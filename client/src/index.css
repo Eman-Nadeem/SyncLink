@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+:root {
+  --bg-main: #f8fafc;
+  --bg-card: #ffffff;
+  --bg-sidebar: #ffffff;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+  --border-main: #e2e8f0;
+  --indigo-primary: #6366f1;
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.3);
+}
+
+.dark {
+  --bg-main: #020617;
+  --bg-card: #0f172a;
+  --bg-sidebar: #0f172a;
+  --text-main: #f8fafc;
+  --text-muted: #94a3b8;
+  --border-main: #1e293b;
+  --glass-bg: rgba(15, 23, 42, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.05);
+}
+
+@layer base {
+  body {
+    background-color: var(--bg-main);
+    color: var(--text-main);
+    @apply font-['Inter'] antialiased selection:bg-indigo-500/30 overflow-x-hidden;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-['Plus_Jakarta_Sans'] tracking-tight font-black;
+  }
+}
+
+@layer components {
+  .sidebar-link {
+    color: var(--text-muted);
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all duration-200;
+  }
+
+  .sidebar-link:hover {
+    color: var(--indigo-primary);
+    background-color: rgba(99, 102, 241, 0.05);
+  }
+
+  .sidebar-link-active {
+    color: var(--indigo-primary);
+    background-color: rgba(99, 102, 241, 0.1);
+    @apply shadow-sm shadow-indigo-500/5;
+  }
+
+  .glass-card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-main);
+    @apply rounded-[24px] shadow-sm transition-all duration-300 backdrop-blur-md;
+  }
+  
+  .glass-card:hover {
+    @apply shadow-xl shadow-indigo-500/5 -translate-y-0.5 border-indigo-500/10;
+  }
+
+  .btn-premium {
+    @apply px-6 py-3 rounded-xl font-black transition-all active:scale-95 flex items-center justify-center gap-2.5;
+    @apply bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg shadow-indigo-500/20;
+    @apply text-sm;
+  }
+
+  .input-glass {
+    background-color: var(--bg-main);
+    border: 1px solid var(--border-main);
+    color: var(--text-main);
+    @apply w-full rounded-xl px-5 py-3 focus:outline-none focus:border-indigo-500/50 transition-all placeholder:text-slate-400 text-sm font-bold;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { 
+    background: var(--border-main);
+    @apply rounded-full hover:bg-slate-400; 
+  }
+}

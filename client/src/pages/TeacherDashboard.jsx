@@ -304,7 +304,7 @@ export default function TeacherDashboard() {
       {isSidebarOpen && <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
 
       <aside className={`w-72 bg-gradient-to-b from-white dark:from-[var(--bg-card)] via-teal-50 dark:via-teal-900/10 to-teal-100 dark:to-teal-900/20 border-r border-teal-100/80 dark:border-teal-900/30 flex flex-col fixed h-full z-50 shadow-[2px_0_20px_rgba(20,184,166,0.12)] lg:shadow-none transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
-        <div className="p-8 flex items-center gap-3">
+        <div className="p-6 md:p-8 flex items-center gap-3">
           <div className="w-10 h-10 flex items-center justify-center relative">
             <motion.div animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} className="w-full h-full">
               <svg viewBox="0 0 100 100" className="w-full h-full drop-shadow-[0_0_8px_rgba(99,102,241,0.3)]">
@@ -325,7 +325,7 @@ export default function TeacherDashboard() {
           <h1 className="text-xl font-black tracking-tighter text-[var(--text-main)]">Sync<span className="text-indigo-600">Link</span></h1>
         </div>
         
-        <nav className="flex-1 px-4 space-y-2 mt-4 overflow-y-auto custom-scrollbar">
+        <nav className="flex-1 px-4 space-y-1 md:space-y-2 mt-2 md:mt-4 overflow-y-auto custom-scrollbar">
           <button onClick={() => { setSelectedClassForView(null); setIsSidebarOpen(false); }} className={`w-full sidebar-link ${!selectedClassForView ? 'sidebar-link-active' : ''}`}><Layout className="w-5 h-5" /> All Classrooms</button>
           
           <div className="pt-4 pb-2 px-3">
@@ -338,8 +338,8 @@ export default function TeacherDashboard() {
           ))}
         </nav>
 
-        <div className="p-6 mt-auto">
-          <div className="glass-card p-5 border-indigo-100 relative overflow-hidden group">
+        <div className="p-4 md:p-6 mt-auto">
+          <div className="glass-card p-4 md:p-5 border-indigo-100 relative overflow-hidden group">
             <div className="relative z-10">
               <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><User className="w-4 h-4" /></div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Teacher Account</p>
@@ -349,7 +349,7 @@ export default function TeacherDashboard() {
               </button>
             </div>
           </div>
-          <button onClick={logout} className="w-full mt-6 flex items-center gap-3 px-4 py-3 text-slate-400 font-bold hover:text-red-500 transition-colors">
+          <button onClick={logout} className="w-full mt-4 md:mt-6 flex items-center gap-3 px-4 py-2 md:py-3 text-slate-400 font-bold hover:text-red-500 transition-colors">
             <LogOut className="w-5 h-5" /> Sign Out
           </button>
         </div>

@@ -5,7 +5,7 @@ import {
   LogOut, UploadCloud, FileText, CheckCircle2, Clock, 
   Award, Bell, X, ChevronDown, GraduationCap, Download, BarChart2, User, LayoutDashboard,
   PieChart as PieIcon, TrendingUp, Search, ChevronRight, Filter, SortAsc, MoreHorizontal, BookOpen, Target, ArrowLeft, MessageSquare,
-  Sun, Moon, Sparkles
+  Sun, Moon, Sparkles, Menu, XCircle
 } from 'lucide-react';
 import { 
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -15,11 +15,19 @@ import { supabase } from '../supabase/supabaseClient';
 
 export default function StudentDashboard() {
   const { currentUser, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState(() => window.location.hash.replace('#', '') || 'overview');
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [classes, setClasses] = useState([]);
+  const [enrollments, setEnrollments] = useState([]);
+  const [selectedClassId, setSelectedClassId] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [mySubmissions, setMySubmissions] = useState([]);
   const [selectedAssignmentId, setSelectedAssignmentId] = useState('');
+  const [showEnrollModal, setShowEnrollModal] = useState(false);
+  const [selectedClassToEnroll, setSelectedClassToEnroll] = useState(null);
+  const [enrollForm, setEnrollForm] = useState({ name: '', rollNo: '' });
+  const [attendance, setAttendance] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [file, setFile] = useState(null);
   const [uploadStatus, setUploadStatus] = useState('idle');
@@ -40,10 +48,16 @@ export default function StudentDashboard() {
 
   const fetchData = async () => {
     try {
-      const { data: a } = await supabase.from('assignments').select('*').order('deadline', { ascending: true });
-      const { data: s } = await supabase.from('submissions').select('*, assignments(title, total_marks, deadline)').eq('student_email', currentUser?.email).order('submitted_at', { ascending: false });
+      const { data: c } = await supabase.from('classes').select('*').order('created_at', { ascending: false });
+      const { data: a } = await supabase.from('assignments').select('*, classes(name)').order('deadline', { ascending: true });
+      const { data: s } = await supabase.from('submissions').select('*, assignments(title, total_marks, deadline, class_id, classes(name))').eq('student_email', currentUser?.email).order('submitted_at', { ascending: false });
+      const { data: e } = await supabase.from('enrollments').select('*').eq('student_email', currentUser?.email);
+      const { data: att } = await supabase.from('attendance').select('*').eq('student_email', currentUser?.email);
+      if (c) setClasses(c);
       if (a) setAssignments(a);
       if (s) setMySubmissions(s);
+      if (e) setEnrollments(e);
+      if (att) setAttendance(att);
     } catch (err) {
       console.error(err);
     } finally {
@@ -61,7 +75,7 @@ export default function StudentDashboard() {
     const assignmentsChannel = supabase
       .channel('realtime_assignments_student')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assignments' }, (payload) => {
-        setAssignments(prev => [payload.new, ...prev]);
+        setAssignments(prev => prev.some(a => a.id === payload.new.id) ? prev : [payload.new, ...prev]);
         addToast(`New assignment: "${payload.new.title}"`, 'info');
         setNotifications(prev => [{ id: Date.now(), msg: `New assignment posted: ${payload.new.title}`, type: 'assignment' }, ...prev]);
       })
@@ -87,7 +101,7 @@ export default function StudentDashboard() {
         setMySubmissions(prev => prev.map(s => s.id === payload.new.id ? { ...s, ...payload.new } : s));
         if (payload.new.status === 'graded') {
           addToast('🎉 Your assignment was graded!', 'success');
-          setNotifications(prev => [{ id: Date.now(), msg: `New grade received for "${payload.new.file_name}"`, type: 'grade' }, ...prev]);
+          setNotifications(prev => [{ id: Date.now(), msg: `Assignment Graded: ${payload.new.assignments?.title || 'Evaluation complete'}`, type: 'grade' }, ...prev]);
         }
       })
       .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'submissions', filter: `student_email=eq.${currentUser.email}` }, (payload) => {
@@ -95,11 +109,67 @@ export default function StudentDashboard() {
       })
       .subscribe();
 
+    const classesChannel = supabase
+      .channel('realtime_classes_student')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'classes' }, (payload) => {
+        setClasses(prev => prev.some(c => c.id === payload.new.id) ? prev : [payload.new, ...prev]);
+      })
+      .subscribe();
+
+    // ✅ REALTIME CHANNEL 4: Enrollments (approval/rejection)
+    const enrollmentsChannel = supabase
+      .channel('realtime_enrollments_student')
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'enrollments',
+        filter: `student_email=eq.${currentUser.email}`
+      }, (payload) => {
+        setEnrollments(prev => prev.map(e => e.id === payload.new.id ? payload.new : e));
+        if (payload.new.status === 'approved') {
+          addToast('✅ Enrollment Approved!', 'success');
+          setNotifications(prev => [{ id: Date.now(), msg: `Enrollment Approved for class`, type: 'enrollment' }, ...prev]);
+        } else if (payload.new.status === 'rejected') {
+          addToast('❌ Enrollment Rejected', 'error');
+          setNotifications(prev => [{ id: Date.now(), msg: `Enrollment Rejected for class`, type: 'enrollment' }, ...prev]);
+        }
+      })
+      .subscribe();
+
+    const attendanceChannel = supabase
+      .channel('realtime_attendance_student')
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'attendance',
+        filter: `student_email=eq.${currentUser.email}`
+      }, (payload) => {
+        fetchData();
+      })
+      .subscribe();
+
     return () => {
       supabase.removeChannel(assignmentsChannel);
       supabase.removeChannel(submissionsChannel);
+      supabase.removeChannel(classesChannel);
+      supabase.removeChannel(enrollmentsChannel);
+      supabase.removeChannel(attendanceChannel);
     };
   }, [currentUser?.email]);
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '') || 'overview';
+      setActiveTab(hash);
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  const changeTab = (tab) => {
+    window.location.hash = tab;
+    setIsSidebarOpen(false);
+  };
 
   const toggleDarkMode = () => {
     setIsDarkMode(!isDarkMode);
@@ -108,6 +178,14 @@ export default function StudentDashboard() {
 
   const handleUpload = async () => {
     if (!file || !selectedAssignmentId) return alert('Select assignment & file');
+    
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!['pdf', 'doc', 'docx'].includes(ext)) {
+      alert('Invalid file format! Only PDF, DOC, and DOCX files are allowed.');
+      setFile(null);
+      return;
+    }
+
     setUploadStatus('uploading');
     try {
       const ext = file.name.split('.').pop();
@@ -137,6 +215,39 @@ export default function StudentDashboard() {
     }
   };
 
+  const handleEnrollRequest = async (e) => {
+    e.preventDefault();
+    try {
+      const { error } = await supabase.from('enrollments').insert([{
+        class_id: selectedClassToEnroll.id,
+        student_email: currentUser.email,
+        student_name: enrollForm.name,
+        student_roll_no: enrollForm.rollNo,
+        status: 'pending'
+      }]);
+      if (error) throw error;
+      addToast('Enrollment request sent!', 'success');
+      setShowEnrollModal(false);
+      fetchData();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const myClassIds = enrollments.filter(e => e.status === 'approved').map(e => e.class_id);
+  const pendingClassIds = enrollments.filter(e => e.status === 'pending').map(e => e.class_id);
+  const rejectedClassIds = enrollments.filter(e => e.status === 'rejected').map(e => e.class_id);
+
+  const myClasses = classes.filter(c => myClassIds.includes(c.id));
+  const availableClasses = classes.filter(c => !myClassIds.includes(c.id) && !pendingClassIds.includes(c.id) && !rejectedClassIds.includes(c.id));
+  const pendingClasses = classes.filter(c => pendingClassIds.includes(c.id));
+  const rejectedClasses = classes.filter(c => rejectedClassIds.includes(c.id));
+
+  const totalPresent = attendance.filter(a => a.status === 'present').length;
+  const totalAbsent = attendance.filter(a => a.status === 'absent').length;
+  const totalClasses = totalPresent + totalAbsent;
+  const attendanceRate = totalClasses > 0 ? Math.round((totalPresent / totalClasses) * 100) : 0;
+
   const handleReplySubmit = async (e) => {
     e.preventDefault();
     if (!studentReply.trim()) return;
@@ -160,8 +271,21 @@ export default function StudentDashboard() {
     if (!window.confirm('Are you sure you want to delete this submission? You can re-upload after deleting.')) return;
     try {
       await supabase.from('submissions').delete().eq('id', submissionId);
-      addToast('Submission deleted', 'success');
+      addToast('Submission deleted successfully', 'success');
       fetchData();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleEditSubmission = async (submission) => {
+    if (!window.confirm('To edit, your previous submission will be removed so you can upload a new one. Continue?')) return;
+    try {
+      await supabase.from('submissions').delete().eq('id', submission.id);
+      addToast('Ready for new upload.', 'info');
+      fetchData();
+      changeTab('overview');
+      setSelectedAssignmentId(submission.assignment_id);
     } catch (err) {
       alert(err.message);
     }
@@ -169,7 +293,7 @@ export default function StudentDashboard() {
 
   const gradedSubmissions = mySubmissions.filter(s => s.status === 'graded');
   const avgGrade = gradedSubmissions.length ? (gradedSubmissions.reduce((acc, curr) => acc + ((curr.grade / (curr.assignments?.total_marks || 100)) * 100), 0) / gradedSubmissions.length).toFixed(1) : 0;
-  const filteredAssignments = assignments.filter(a => a.title.toLowerCase().includes(searchTerm.toLowerCase()));
+  const filteredAssignments = assignments.filter(a => a.title.toLowerCase().includes(searchTerm.toLowerCase()) && a.class_id === selectedClassId && myClassIds.includes(a.class_id));
   const filteredSubmissions = mySubmissions.filter(s => s.assignments?.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
   const chartData = useMemo(() => {
@@ -212,8 +336,11 @@ export default function StudentDashboard() {
 
   return (
     <div className="min-h-screen bg-[var(--bg-main)] flex font-['Plus_Jakarta_Sans'] text-[var(--text-main)] transition-colors duration-300">
+      {/* Mobile Overlay */}
+      {isSidebarOpen && <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-40 lg:hidden" onClick={() => setIsSidebarOpen(false)}></div>}
+      
       {/* Sidebar */}
-      <aside className="w-72 bg-gradient-to-b from-white dark:from-[var(--bg-card)] via-teal-50 dark:via-teal-900/10 to-teal-100 dark:to-teal-900/20 border-r border-teal-100/80 dark:border-teal-900/30 flex flex-col fixed h-full z-20 shadow-[2px_0_20px_rgba(20,184,166,0.12)] dark:shadow-none">
+      <aside className={`w-72 bg-gradient-to-b from-white dark:from-[var(--bg-card)] via-teal-50 dark:via-teal-900/10 to-teal-100 dark:to-teal-900/20 border-r border-teal-100/80 dark:border-teal-900/30 flex flex-col fixed h-full z-50 shadow-[2px_0_20px_rgba(20,184,166,0.12)] lg:shadow-none transition-transform duration-300 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}>
         <div className="p-8 flex items-center gap-3">
           <div className="w-10 h-10 flex items-center justify-center relative">
             <motion.div animate={{ rotate: 360 }} transition={{ duration: 8, repeat: Infinity, ease: "linear" }} className="w-full h-full">
@@ -235,10 +362,10 @@ export default function StudentDashboard() {
           <h1 className="text-xl font-black tracking-tighter text-[var(--text-main)]">Sync<span className="text-indigo-600">Link</span></h1>
         </div>
 
-        <nav className="flex-1 px-4 space-y-2 mt-4">
-          <button onClick={() => setActiveTab('overview')} className={`w-full sidebar-link ${activeTab === 'overview' ? 'sidebar-link-active' : ''}`}><LayoutDashboard className="w-5 h-5" /> Overview</button>
-          <button onClick={() => setActiveTab('assignments')} className={`w-full sidebar-link ${activeTab === 'assignments' ? 'sidebar-link-active' : ''}`}><BookOpen className="w-5 h-5" /> Assignments</button>
-          <button onClick={() => setActiveTab('progress')} className={`w-full sidebar-link ${activeTab === 'progress' ? 'sidebar-link-active' : ''}`}><TrendingUp className="w-5 h-5" /> My Progress</button>
+        <nav className="flex-1 px-4 space-y-2 mt-4 overflow-y-auto custom-scrollbar">
+          <button onClick={() => changeTab('overview')} className={`w-full sidebar-link ${activeTab === 'overview' ? 'sidebar-link-active' : ''}`}><LayoutDashboard className="w-5 h-5" /> Overview</button>
+          <button onClick={() => { changeTab('classes'); setSelectedClassId(null); }} className={`w-full sidebar-link ${activeTab === 'classes' || activeTab === 'assignments' ? 'sidebar-link-active' : ''}`}><BookOpen className="w-5 h-5" /> Subjects</button>
+          <button onClick={() => changeTab('progress')} className={`w-full sidebar-link ${activeTab === 'progress' ? 'sidebar-link-active' : ''}`}><TrendingUp className="w-5 h-5" /> My Progress</button>
         </nav>
 
         <div className="p-6 mt-auto">
@@ -247,23 +374,26 @@ export default function StudentDashboard() {
               <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><User className="w-4 h-4" /></div>
               <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Student Account</p>
               <h4 className="text-sm font-black text-[var(--text-main)] group-hover:text-indigo-600 transition-colors capitalize">{currentUser?.email?.split('@')[0]}</h4>
-              <button onClick={() => setActiveTab('overview')} className="w-full mt-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
+              <button onClick={() => changeTab('overview')} className="w-full mt-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
                 <UploadCloud className="w-4 h-4" /> New Upload
               </button>
             </div>
           </div>
           
-          <button onClick={logout} className="w-full mt-6 flex items-center gap-3 px-4 py-3 text-slate-400 font-bold hover:text-red-500 transition-colors">
+          <button onClick={logout} className="w-full mt-6 flex items-center gap-3 px-4 py-3 text-[var(--text-muted)] font-bold hover:text-red-500 transition-colors">
             <LogOut className="w-5 h-5" /> Sign Out
           </button>
         </div>
       </aside>
 
-      <main className="flex-1 ml-72 min-h-screen">
-        <header className="h-20 bg-teal-500/[0.03] backdrop-blur-md border-b border-[var(--border-main)] sticky top-0 z-40 px-8 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            {activeTab !== 'overview' && (
-              <button onClick={() => setActiveTab('overview')} className="w-10 h-10 flex items-center justify-center text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
+      <main className="flex-1 lg:ml-72 min-h-screen flex flex-col w-full">
+        <header className="h-20 bg-teal-500/[0.03] backdrop-blur-md border-b border-[var(--border-main)] sticky top-0 z-30 px-4 md:px-8 flex items-center justify-between">
+          <div className="flex items-center gap-3 md:gap-4">
+            <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden w-10 h-10 flex items-center justify-center text-[var(--text-muted)] hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
+              <Menu className="w-5 h-5" />
+            </button>
+            {activeTab !== 'overview' && activeTab !== 'classes' && (
+              <button onClick={() => { if (activeTab === 'assignments') changeTab('classes'); else changeTab('overview'); }} className="hidden md:flex w-10 h-10 items-center justify-center text-[var(--text-muted)] hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all">
                 <ArrowLeft className="w-5 h-5" />
               </button>
             )}
@@ -274,7 +404,7 @@ export default function StudentDashboard() {
           </div>
           <div className="flex items-center gap-6">
             <div className="relative hidden md:block">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
               <input 
                 type="text" 
                 placeholder="Find assignments..." 
@@ -319,20 +449,51 @@ export default function StudentDashboard() {
           </div>
         </header>
 
-        <div className="p-8 space-y-8">
+        <div className="p-4 md:p-8 space-y-6 md:space-y-8">
           <AnimatePresence mode="wait">
             {activeTab === 'overview' && (
               <motion.div key="overview" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} className="space-y-8">
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
                   <div>
-                    <h1 className="text-3xl font-black text-[var(--text-main)]">Hello, {currentUser?.email?.split('@')[0]}!</h1>
-                    <p className="text-[var(--text-muted)] font-medium">You have {assignments.length - mySubmissions.length} pending tasks for this week.</p>
+                    <h1 className="text-2xl md:text-3xl font-black text-[var(--text-main)]">Hello, {currentUser?.email?.split('@')[0]}!</h1>
+                    <p className="text-xs md:text-sm text-[var(--text-muted)] font-medium">You have {assignments.length - mySubmissions.length} pending tasks.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  <div className="glass-card p-6">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Attendance</p>
+                    <div className="flex items-end justify-between">
+                      <h3 className="text-2xl font-black text-indigo-600">{attendanceRate}%</h3>
+                      <div className="w-8 h-8 bg-indigo-50 rounded-lg flex items-center justify-center text-indigo-600"><Clock className="w-4 h-4"/></div>
+                    </div>
+                  </div>
+                  <div className="glass-card p-6">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Present</p>
+                    <div className="flex items-end justify-between">
+                      <h3 className="text-2xl font-black text-emerald-600">{totalPresent}</h3>
+                      <div className="w-8 h-8 bg-emerald-50 rounded-lg flex items-center justify-center text-emerald-600"><CheckCircle2 className="w-4 h-4"/></div>
+                    </div>
+                  </div>
+                  <div className="glass-card p-6">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Absent</p>
+                    <div className="flex items-end justify-between">
+                      <h3 className="text-2xl font-black text-rose-600">{totalAbsent}</h3>
+                      <div className="w-8 h-8 bg-rose-50 rounded-lg flex items-center justify-center text-rose-600"><XCircle className="w-4 h-4"/></div>
+                    </div>
+                  </div>
+                  <div className="glass-card p-6">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">Performance Index</p>
+                    <div className="flex items-end justify-between">
+                      <h3 className="text-2xl font-black text-amber-600">{avgGrade}%</h3>
+                      <div className="w-8 h-8 bg-amber-50 rounded-lg flex items-center justify-center text-amber-600"><Target className="w-4 h-4"/></div>
+                    </div>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   <div className="lg:col-span-2 space-y-8">
-                    <div className="glass-card p-8">
+                    <div className="glass-card p-6 md:p-8">
                       <div className="flex items-center justify-between mb-8">
                         <h2 className="text-xl font-black text-[var(--text-main)] flex items-center gap-3">
                           <div className="w-10 h-10 bg-indigo-500/10 rounded-xl flex items-center justify-center border border-indigo-500/20">
@@ -343,23 +504,27 @@ export default function StudentDashboard() {
                       </div>
                       <div className="space-y-6">
                         <div>
-                          <label className="block text-xs font-bold text-slate-400 mb-2 px-1 uppercase tracking-widest">Select Assignment</label>
+                          <label className="block text-xs font-bold text-[var(--text-muted)] mb-2 px-1 uppercase tracking-widest">Select Assignment</label>
                           <div className="relative">
-                            <select value={selectedAssignmentId} onChange={e => setSelectedAssignmentId(e.target.value)} className="input-glass appearance-none cursor-pointer pr-12 bg-slate-50">
+                            <select value={selectedAssignmentId} onChange={e => setSelectedAssignmentId(e.target.value)} className="input-glass appearance-none cursor-pointer pr-12 bg-[var(--bg-main)]">
                               <option value="">Choose a task to submit</option>
-                              {assignments.map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
+                              {assignments.filter(a => {
+                                 if (!myClassIds.includes(a.class_id)) return false;
+                                 const sub = mySubmissions.find(s => s.assignment_id === a.id);
+                                 return !sub || sub.status !== 'graded';
+                              }).map(a => <option key={a.id} value={a.id}>{a.title}</option>)}
                             </select>
-                            <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400 pointer-events-none" />
+                            <ChevronDown className="absolute right-6 top-1/2 -translate-y-1/2 w-5 h-5 text-[var(--text-muted)] pointer-events-none" />
                           </div>
                         </div>
-                        <div className={`border-2 border-dashed rounded-[24px] p-12 text-center transition-all ${!selectedAssignmentId ? 'border-slate-100 opacity-50' : 'border-indigo-100 bg-indigo-50/20 hover:border-indigo-300 group'}`}>
+                        <div className={`border-2 border-dashed rounded-[24px] p-6 md:p-12 text-center transition-all ${!selectedAssignmentId ? 'border-[var(--border-main)] opacity-50' : 'border-indigo-100 bg-indigo-50/20 hover:border-indigo-300 group'}`}>
                           {uploadStatus === 'idle' ? (
                             <>
-                              <div className="w-20 h-20 bg-white rounded-3xl flex items-center justify-center shadow-sm mx-auto mb-6 group-hover:scale-110 transition-transform">
+                              <div className="w-16 h-16 md:w-20 md:h-20 bg-[var(--bg-main)] rounded-3xl flex items-center justify-center shadow-sm mx-auto mb-4 md:mb-6 group-hover:scale-110 transition-transform">
                                 <Download className="w-8 h-8 text-indigo-300 group-hover:text-indigo-600 transition-colors" />
                               </div>
-                              <p className="text-sm font-bold text-slate-900 mb-1">Drag and drop your file here</p>
-                              <p className="text-xs text-slate-400 mb-8 font-medium">Supported formats: PDF, DOCX (Max 10MB)</p>
+                              <p className="text-sm font-bold text-[var(--text-main)] mb-1">Drag and drop your file here</p>
+                              <p className="text-xs text-[var(--text-muted)] mb-8 font-medium">Supported formats: PDF, DOCX (Max 10MB)</p>
                               <input type="file" id="stu-v3-up" className="hidden" accept=".pdf,.doc,.docx" onChange={e => setFile(e.target.files[0])} disabled={!selectedAssignmentId} />
                               <label htmlFor="stu-v3-up" className={`btn-premium inline-flex py-3 px-10 text-sm ${!selectedAssignmentId ? 'opacity-50 pointer-events-none' : 'cursor-pointer'}`}>Browse Files</label>
                               {file && (
@@ -392,7 +557,7 @@ export default function StudentDashboard() {
                       <div className="glass-card p-6 min-h-[300px]">
                         <div className="flex items-center justify-between mb-6">
                           <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2"><TrendingUp className="w-5 h-5 text-indigo-600" /> Grade Trend</h3>
-                          <button onClick={() => setActiveTab('progress')}><MoreHorizontal className="w-5 h-5 text-slate-300" /></button>
+                          <button onClick={() => changeTab('progress')}><MoreHorizontal className="w-5 h-5 text-slate-300" /></button>
                         </div>
                         <div className="h-[200px] w-full">
                           <ResponsiveContainer width="100%" height="100%">
@@ -439,15 +604,22 @@ export default function StudentDashboard() {
                         {mySubmissions.slice(0, 5).map(sub => (
                           <div key={sub.id} className="p-4 rounded-2xl border border-[var(--border-main)] hover:border-indigo-500/50 transition-all group bg-[var(--bg-card)]">
                             <div className="flex justify-between items-start mb-2 gap-2">
-                              <h5 className="text-sm font-bold text-[var(--text-main)] line-clamp-2">{sub.assignments?.title}</h5>
-                              <span className={`px-3 py-1 rounded-lg text-[10px] font-bold border ${sub.status === 'graded' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-orange-50 text-orange-600 border-orange-100'}`}>
+                              <div className="flex flex-col gap-1">
+                                {sub.assignments?.classes?.name && <span className="text-[9px] font-black uppercase text-indigo-500 tracking-widest">{sub.assignments.classes.name}</span>}
+                                <h5 className="text-sm font-bold text-[var(--text-main)] line-clamp-2">{sub.assignments?.title}</h5>
+                              </div>
+                              <span className={`px-3 py-1 rounded-lg text-[10px] font-bold border ${sub.status === 'graded' ? (((sub.grade / (sub.assignments?.total_marks || 100)) * 100) < 50 ? 'bg-rose-50 text-rose-600 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100') : 'bg-orange-50 text-orange-600 border-orange-100'}`}>
                                 {sub.status === 'graded' ? 'Graded' : 'Submitted'}
                               </span>
                             </div>
                             <div className="flex justify-between items-center">
-                               <p className="text-[11px] text-slate-400 font-medium">Submitted on {new Date(sub.submitted_at).toLocaleDateString()}</p>
+                               <p className="text-[11px] text-[var(--text-muted)] font-medium">Submitted on {new Date(sub.submitted_at).toLocaleDateString()}</p>
                                {sub.status !== 'graded' && (
-                                 <button onClick={() => handleDeleteSubmission(sub.id)} className="text-[10px] font-bold text-red-500 hover:underline">Delete / Edit</button>
+                                 <div className="flex items-center gap-3">
+                                   <button onClick={() => handleEditSubmission(sub)} className="text-[10px] font-bold text-indigo-500 hover:text-indigo-600 transition-colors">Edit</button>
+                                   <div className="w-px h-3 bg-slate-200"></div>
+                                   <button onClick={() => handleDeleteSubmission(sub.id)} className="text-[10px] font-bold text-red-500 hover:text-red-600 transition-colors">Delete</button>
+                                 </div>
                                )}
                             </div>
                           </div>
@@ -457,11 +629,11 @@ export default function StudentDashboard() {
                     </div>
                     <div className="glass-card p-6 bg-slate-900 text-white border-none shadow-xl shadow-slate-200 overflow-hidden relative group">
                       <div className="relative z-10">
-                        <h3 className="text-lg font-black mb-6 flex items-center gap-2 text-white"><Sparkles className="w-5 h-5 text-amber-400" /> Mastery Level</h3>
+                        <h3 className="text-lg font-black mb-6 flex items-center gap-2 text-white"><Sparkles className="w-5 h-5 text-amber-400" /> Performance Index</h3>
                         <div className="space-y-6">
                           <div>
-                            <div className="flex justify-between text-[10px] font-black mb-2 uppercase tracking-widest text-slate-400"><span>Attendance Rate</span><span className="text-white">94%</span></div>
-                            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{ width: '94%' }}></div></div>
+                            <div className="flex justify-between text-[10px] font-black mb-2 uppercase tracking-widest text-slate-400"><span>Attendance Rate</span><span className="text-white">{attendanceRate}%</span></div>
+                            <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 rounded-full" style={{ width: `${attendanceRate}%` }}></div></div>
                           </div>
                           <div>
                             <div className="flex justify-between text-[10px] font-black mb-2 uppercase tracking-widest text-slate-400"><span>Avg Performance</span><span className="text-white">{avgGrade}%</span></div>
@@ -470,7 +642,7 @@ export default function StudentDashboard() {
                         </div>
                         <button 
                           onClick={() => {
-                            const report = `STUDENT ACADEMIC REPORT\nName: ${currentUser.email.split('@')[0]}\nAvg Mastery: ${avgGrade}%\nAttendance: 94%\n\nDetailed Scores:\n` + gradedSubmissions.map(s => `- ${s.assignments?.title}: ${s.grade}/${s.assignments?.total_marks}`).join('\n');
+                            const report = `STUDENT ACADEMIC REPORT\nName: ${currentUser.email.split('@')[0]}\nAvg Performance: ${avgGrade}%\nAttendance: 94%\n\nDetailed Scores:\n` + gradedSubmissions.map(s => `- ${s.assignments?.title}: ${s.grade}/${s.assignments?.total_marks}`).join('\n');
                             const blob = new Blob([report], { type: 'text/plain' });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
@@ -490,11 +662,83 @@ export default function StudentDashboard() {
               </motion.div>
             )}
 
-            {activeTab === 'assignments' && (
+            {activeTab === 'classes' && (
+              <motion.div key="classes" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
+                 
+                 {/* My Classes */}
+                 <div>
+                   <h2 className="text-xl font-black text-[var(--text-main)] tracking-tight mb-6 flex items-center gap-2"><CheckCircle2 className="w-5 h-5 text-emerald-500" /> My Approved Classes</h2>
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {myClasses.map(c => {
+                      const classAssignments = assignments.filter(a => a.class_id === c.id);
+                      return (
+                        <div key={c.id} onClick={() => { setSelectedClassId(c.id); changeTab('assignments'); }} className="glass-card p-6 group flex flex-col relative overflow-hidden cursor-pointer hover:border-indigo-500/50">
+                          <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/10 transition-all"></div>
+                          <div className="w-12 h-12 bg-indigo-500/10 rounded-2xl flex items-center justify-center text-indigo-600 mb-6 group-hover:scale-110 transition-transform border border-indigo-500/20"><BookOpen className="w-6 h-6" /></div>
+                          <h3 className="text-xl font-black text-[var(--text-main)] mb-2 group-hover:text-indigo-600 transition-colors">{c.name}</h3>
+                          <p className="text-xs text-[var(--text-muted)] mb-4">{classAssignments.length} Assignments</p>
+                          <div className="mt-auto text-xs font-bold text-indigo-600 flex items-center gap-1 group-hover:translate-x-1 transition-transform">View Tasks <ChevronRight className="w-4 h-4" /></div>
+                        </div>
+                      );
+                    })}
+                    {myClasses.length === 0 && (
+                      <div className="col-span-full py-10 text-center text-slate-400 font-bold italic">You are not enrolled in any classes yet.</div>
+                    )}
+                   </div>
+                 </div>
+
+                 {/* Available Classes */}
+                 <div className="pt-8 border-t border-[var(--border-main)]">
+                   <h2 className="text-xl font-black text-[var(--text-main)] tracking-tight mb-6 flex items-center gap-2"><Search className="w-5 h-5 text-indigo-500" /> Available Classes</h2>
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {availableClasses.map(c => (
+                      <div key={c.id} className="glass-card p-6 flex flex-col relative overflow-hidden">
+                        <div className="w-12 h-12 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-400 mb-6"><BookOpen className="w-6 h-6" /></div>
+                        <h3 className="text-xl font-black text-[var(--text-main)] mb-2">{c.name}</h3>
+                        <p className="text-xs text-[var(--text-muted)] mb-6">Instructor: {c.teacher_email}</p>
+                        <button onClick={() => { setSelectedClassToEnroll(c); setShowEnrollModal(true); }} className="mt-auto py-2.5 w-full bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 rounded-xl font-bold text-xs hover:bg-indigo-100 dark:hover:bg-indigo-500/20 transition-colors">
+                          Request Enrollment
+                        </button>
+                      </div>
+                    ))}
+                    {pendingClasses.map(c => (
+                      <div key={c.id} className="glass-card p-6 flex flex-col relative overflow-hidden opacity-60">
+                        <div className="w-12 h-12 bg-orange-50 dark:bg-orange-500/10 rounded-2xl flex items-center justify-center text-orange-500 mb-6"><Clock className="w-6 h-6" /></div>
+                        <h3 className="text-xl font-black text-[var(--text-main)] mb-2">{c.name}</h3>
+                        <p className="text-xs text-[var(--text-muted)] mb-6">Instructor: {c.teacher_email}</p>
+                        <div className="mt-auto py-2.5 w-full bg-orange-50 text-orange-600 dark:bg-orange-500/10 dark:text-orange-400 rounded-xl font-bold text-xs text-center border border-orange-200 dark:border-orange-500/20">
+                          Pending Approval
+                        </div>
+                      </div>
+                    ))}
+                    {rejectedClasses.map(c => (
+                      <div key={c.id} className="glass-card p-6 flex flex-col relative overflow-hidden opacity-60 border-red-500/20">
+                        <div className="w-12 h-12 bg-red-50 dark:bg-red-500/10 rounded-2xl flex items-center justify-center text-red-500 mb-6"><XCircle className="w-6 h-6" /></div>
+                        <h3 className="text-xl font-black text-[var(--text-main)] mb-2">{c.name}</h3>
+                        <p className="text-xs text-[var(--text-muted)] mb-6">Instructor: {c.teacher_email}</p>
+                        <div className="mt-auto py-2.5 w-full bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400 rounded-xl font-bold text-xs text-center border border-red-200 dark:border-red-500/20">
+                          Request Rejected
+                        </div>
+                      </div>
+                    ))}
+                    {availableClasses.length === 0 && pendingClasses.length === 0 && rejectedClasses.length === 0 && (
+                      <div className="col-span-full py-10 text-center text-slate-400 font-bold italic">No more classes available to join.</div>
+                    )}
+                   </div>
+                 </div>
+
+              </motion.div>
+            )}
+
+            {activeTab === 'assignments' && selectedClassId && (
               <motion.div key="assignments" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {filteredAssignments.map(a => {
                     const sub = mySubmissions.find(s => s.assignment_id === a.id);
+                    const isGraded = sub?.status === 'graded';
+                    const percentage = isGraded ? ((sub.grade / (a.total_marks || 100)) * 100) : 0;
+                    const gradeColor = isGraded ? (percentage < 50 ? 'bg-rose-500/10 text-rose-600 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20') : 'bg-orange-500/10 text-orange-600 border-orange-500/20';
+
                     return (
                       <div key={a.id} className="glass-card p-6 group flex flex-col relative overflow-hidden">
                         <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-full blur-2xl -mr-12 -mt-12 group-hover:bg-indigo-500/10 transition-all"></div>
@@ -503,11 +747,11 @@ export default function StudentDashboard() {
                         <p className="text-xs text-[var(--text-muted)] line-clamp-3 mb-8 leading-relaxed h-12">{a.description || 'No additional guidelines provided.'}</p>
                         <div className="flex items-center justify-between py-4 border-t border-[var(--border-main)] mt-auto">
                           {sub ? (
-                            <span className={`px-3 py-1 rounded-lg text-[10px] font-black border ${sub.status === 'graded' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-orange-500/10 text-orange-600 border-orange-500/20'}`}>
-                              {sub.status === 'graded' ? `Score: ${sub.grade}/${a.total_marks}` : 'Under Review'}
+                            <span className={`px-3 py-1 rounded-lg text-[10px] font-black border ${gradeColor}`}>
+                              {isGraded ? `Score: ${sub.grade}/${a.total_marks}` : 'Under Review'}
                             </span>
                           ) : (
-                            <button onClick={() => { setActiveTab('overview'); setSelectedAssignmentId(a.id); }} className="text-[10px] font-black text-indigo-600 hover:bg-indigo-500/10 px-4 py-2 rounded-xl border border-indigo-500/20 transition-all">Submit Now</button>
+                            <button onClick={() => { changeTab('overview'); setSelectedAssignmentId(a.id); }} className="text-[10px] font-black text-indigo-600 hover:bg-indigo-500/10 px-4 py-2 rounded-xl border border-indigo-500/20 transition-all">Submit Now</button>
                           )}
                           <div className="text-[10px] font-black text-[var(--text-muted)] flex items-center gap-1"><Clock className="w-3 h-3" /> {new Date(a.deadline).toLocaleDateString()}</div>
                         </div>
@@ -515,9 +759,7 @@ export default function StudentDashboard() {
                     );
                   })}
                   {filteredAssignments.length === 0 && (
-                    <div className="col-span-full py-20 text-center">
-                      <p className="text-slate-400 font-bold italic">No assignments found matching your search.</p>
-                    </div>
+                    <div className="col-span-full py-20 text-center text-slate-400 font-bold italic">No tasks in this subject matching your search.</div>
                   )}
                  </div>
               </motion.div>
@@ -526,27 +768,27 @@ export default function StudentDashboard() {
             {activeTab === 'progress' && (
               <motion.div key="progress" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  <div className="glass-card p-8">
-                    <h3 className="text-lg font-bold text-slate-900 mb-6">Attendance & Performance</h3>
+                  <div className="glass-card p-4 md:p-8">
+                    <h3 className="text-lg font-bold text-[var(--text-main)] mb-6">Attendance & Performance</h3>
                     <div className="flex items-center gap-8">
                       <div className="w-32 h-32 relative">
                         <svg className="w-full h-full" viewBox="0 0 36 36">
-                          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#f1f5f9" strokeWidth="3" />
-                          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#6366f1" strokeWidth="3" strokeDasharray="94, 100" />
+                          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="var(--border-main)" strokeWidth="3" />
+                          <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="#6366f1" strokeWidth="3" strokeDasharray={`${attendanceRate}, 100`} />
                         </svg>
                         <div className="absolute inset-0 flex flex-col items-center justify-center">
-                          <span className="text-2xl font-black text-slate-900">94%</span>
-                          <span className="text-[8px] font-bold text-slate-400 uppercase">Present</span>
+                          <span className="text-2xl font-black text-[var(--text-main)]">{attendanceRate}%</span>
+                          <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase">Present</span>
                         </div>
                       </div>
                       <div className="flex-1 space-y-3">
                          {[
-                           { label: 'Classes Conducted', value: '24', color: 'text-slate-900' },
-                           { label: 'Total Present', value: '22', color: 'text-emerald-500' },
-                           { label: 'Total Absent', value: '2', color: 'text-rose-500' }
+                           { label: 'Classes Conducted', value: totalClasses, color: 'text-[var(--text-main)]' },
+                           { label: 'Total Present', value: totalPresent, color: 'text-emerald-500' },
+                           { label: 'Total Absent', value: totalAbsent, color: 'text-rose-500' }
                          ].map((s, i) => (
                            <div key={i} className="flex justify-between items-center text-sm">
-                              <span className="font-bold text-slate-400">{s.label}</span>
+                              <span className="font-bold text-[var(--text-muted)]">{s.label}</span>
                               <span className={`font-black ${s.color}`}>{s.value}</span>
                            </div>
                          ))}
@@ -595,7 +837,31 @@ export default function StudentDashboard() {
         </div>
 
         <AnimatePresence>
-          {showReplyModal && (
+        {showEnrollModal && selectedClassToEnroll && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+            <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-sm glass-card p-8 relative border-[var(--border-main)] bg-[var(--bg-card)]">
+              <button onClick={() => setShowEnrollModal(false)} className="absolute top-6 right-6 text-[var(--text-muted)] hover:text-indigo-600 transition-colors"><X className="w-5 h-5" /></button>
+              <h2 className="text-xl font-black text-[var(--text-main)] mb-2">Join Class</h2>
+              <p className="text-xs text-[var(--text-muted)] mb-6 font-medium">Instructor: {selectedClassToEnroll.teacher_email}</p>
+              <form onSubmit={handleEnrollRequest} className="space-y-5">
+                <div>
+                  <label className="block text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-2 px-1">Your Full Name</label>
+                  <input required type="text" value={enrollForm.name} onChange={e => setEnrollForm({ ...enrollForm, name: e.target.value })} className="input-glass text-sm bg-[var(--bg-main)]" placeholder="John Doe" />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-black text-[var(--text-muted)] uppercase tracking-widest mb-2 px-1">University Roll Number / ID</label>
+                  <input required type="text" value={enrollForm.rollNo} onChange={e => setEnrollForm({ ...enrollForm, rollNo: e.target.value })} className="input-glass text-sm bg-[var(--bg-main)]" placeholder="e.g. FA20-BSE-123" />
+                </div>
+                <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-600 text-[10px] font-bold leading-relaxed">
+                  Your request will be sent to the instructor for approval. You will not be able to see assignments until approved.
+                </div>
+                <button type="submit" className="w-full btn-premium py-4">Send Enrollment Request</button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+
+        {showReplyModal && selectedSubmissionForReply && (
             <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }} className="w-full max-w-md glass-card p-10 relative border-[var(--border-main)] bg-[var(--bg-card)]">
                 <button onClick={() => setShowReplyModal(false)} className="absolute top-6 right-6 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"><X className="w-5 h-5" /></button>

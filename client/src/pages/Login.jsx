@@ -2,32 +2,59 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GraduationCap, Mail, KeyRound, ArrowRight, User, ShieldAlert, UploadCloud, FileText } from 'lucide-react';
+import { GraduationCap, Mail, KeyRound, ArrowRight, User, ShieldAlert, UploadCloud, FileText, Eye, EyeOff, CheckCircle } from 'lucide-react';
 import { Player } from '@lottiefiles/react-lottie-player';
 
 export default function Login() {
-  const [isLoginMode, setIsLoginMode] = useState(true);
+  const [authMode, setAuthMode] = useState('login'); // login, signup, forgot, reset
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState('student');
+  const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const { login, signup, loading: authLoading } = useAuth();
+  const { login, signup, resetPassword, updatePassword, loading: authLoading, currentUser } = useAuth();
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (currentUser && !authLoading) {
+      const r = currentUser.user_metadata?.role || 'student';
+      navigate(r === 'student' ? '/student-dashboard' : '/teacher-dashboard', { replace: true });
+    }
+
+    // Check for recovery hash
+    if (window.location.hash === '#reset-password') {
+      setAuthMode('reset');
+    }
+  }, [currentUser, authLoading, navigate]);
+
   const handleSubmit = async (e) => {
-    e.preventDefault(); setSubmitting(true); setErrorMsg('');
+    e.preventDefault(); setSubmitting(true); setErrorMsg(''); setSuccessMsg('');
+    
     try {
-      if (isLoginMode) {
+      if (authMode === 'login') {
         const d = await login(email, password);
         const r = d.user.user_metadata?.role || 'student';
         navigate(r === 'student' ? '/student-dashboard' : '/teacher-dashboard');
-      } else {
+      } else if (authMode === 'signup') {
         if (!fullName.trim()) throw new Error("Please enter your name.");
-        const d = await signup(email, password, role, fullName);
-        const r = d.user?.user_metadata?.role || role;
-        navigate(r === 'student' ? '/student-dashboard' : '/teacher-dashboard');
+        await signup(email, password, role, fullName);
+        setSuccessMsg("Registration successful! You can now sign in.");
+        setAuthMode('login');
+      } else if (authMode === 'forgot') {
+        if (!email) throw new Error("Please enter your email address.");
+        await resetPassword(email);
+        setSuccessMsg("Reset link sent! Please check your email.");
+      } else if (authMode === 'reset') {
+        if (!password) throw new Error("Please enter a new password.");
+        if (password !== confirmPassword) throw new Error("Passwords do not match.");
+        await updatePassword(password);
+        setSuccessMsg("Password updated! You can now sign in.");
+        setTimeout(() => setAuthMode('login'), 2000);
+        window.location.hash = '';
       }
     } catch (e) { setErrorMsg(e.message); } finally { setSubmitting(false); }
   };
@@ -46,10 +73,10 @@ export default function Login() {
       <div className="absolute top-[20%] right-[10%] w-[20%] h-[20%] bg-teal-400/10 blur-[100px] rounded-full"></div>
       
       
-      <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="w-full max-w-[860px] glass-card overflow-hidden flex flex-col md:flex-row bg-slate-900/40">
+      <motion.div initial={{ opacity: 0, y: 20, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} className="w-full max-w-[860px] glass-card overflow-hidden flex flex-col md:flex-row bg-slate-900/40 min-h-[500px] md:min-h-0">
         
         {/* Left Side Info */}
-        <div className="w-full md:w-[42%] p-10 md:p-14 flex flex-col justify-between bg-white/[0.01] border-r border-white/5">
+        <div className="w-full md:w-[42%] p-8 md:p-14 flex flex-col justify-between bg-white/[0.01] border-b md:border-b-0 md:border-r border-white/5">
           <div>
             <div className="flex items-center gap-4 mb-12">
               <div className="w-14 h-14 flex items-center justify-center relative">
@@ -79,7 +106,7 @@ export default function Login() {
               <h1 className="text-2xl font-black tracking-tighter text-white">Sync<span className="text-teal-400">Link</span></h1>
             </div>
             
-            <h2 className="text-5xl font-extrabold leading-tight mb-8 tracking-tighter">
+            <h2 className="text-3xl md:text-5xl font-extrabold leading-tight mb-8 tracking-tighter">
               Assignment Cloud <br/>
               <span className="bg-gradient-to-r from-teal-400 to-blue-400 bg-clip-text text-transparent italic">Perfected.</span>
             </h2>
@@ -88,8 +115,8 @@ export default function Login() {
             </p>
           </div>
 
-          <div className="flex justify-center py-12">
-             <div className="w-56 h-56 bg-indigo-500/[0.02] rounded-full flex items-center justify-center border border-white/5 shadow-inner relative group">
+          <div className="flex justify-center py-6 md:py-12">
+             <div className="w-40 h-40 md:w-56 md:h-56 bg-indigo-500/[0.02] rounded-full flex items-center justify-center border border-white/5 shadow-inner relative group">
                 <motion.div 
                   animate={{ rotate: 360 }}
                   transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
@@ -140,27 +167,37 @@ export default function Login() {
           </div>
         </div>
 
-        {/* Right Side Auth */}
-        <div className="flex-1 p-10 md:p-20 flex flex-col justify-center">
-          <div className="mb-10">
-            <h2 className="text-3xl font-bold mb-3">
-              {isLoginMode ? 'Welcome back' : 'Create account'}
+        <div className="flex-1 p-8 md:p-16 lg:p-20 flex flex-col justify-center">
+          <div className="mb-6 md:mb-10">
+            <h2 className="text-2xl md:text-4xl font-black mb-3 text-white tracking-tighter">
+              {authMode === 'login' && 'Welcome Back'}
+              {authMode === 'signup' && 'Create Account'}
+              {authMode === 'forgot' && 'Reset Password'}
+              {authMode === 'reset' && 'Create New Password'}
             </h2>
-            <p className="text-slate-400 text-base font-medium">
-              {isLoginMode ? 'Access your academic portal' : 'Join the professional cloud network'}
+            <p className="text-slate-400 text-sm font-medium">
+              {authMode === 'login' && 'Access your professional academic workspace'}
+              {authMode === 'signup' && 'Join the next generation of cloud learning'}
+              {authMode === 'forgot' && 'Enter your email to receive a secure reset link'}
+              {authMode === 'reset' && 'Choose a strong new password for your account'}
             </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <AnimatePresence mode="wait">
               {errorMsg && (
-                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-red-500/10 border border-red-500/20 p-5 rounded-xl flex items-center gap-4 text-red-400 text-xs font-bold">
+                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-red-500/10 border border-red-500/20 p-5 rounded-2xl flex items-center gap-4 text-red-400 text-[11px] font-black">
                   <ShieldAlert className="w-5 h-5 shrink-0" /> {errorMsg}
+                </motion.div>
+              )}
+              {successMsg && (
+                <motion.div initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} className="bg-emerald-500/10 border border-emerald-500/20 p-5 rounded-2xl flex items-center gap-4 text-emerald-400 text-[11px] font-black">
+                  <CheckCircle className="w-5 h-5 shrink-0" /> {successMsg}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {!isLoginMode && (
+            {authMode === 'signup' && (
               <div className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   <button 
@@ -188,31 +225,62 @@ export default function Login() {
                   </button>
                 </div>
                 <div className="relative group">
-                  <User className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within:text-emerald-500 transition-colors" />
-                  <input type="text" required value={fullName} onChange={e => setFullName(e.target.value)} className="input-glass !pl-16" placeholder="Full name" />
+                  <User className="absolute left-8 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-teal-400 transition-colors" />
+                  <input type="text" required value={fullName} onChange={e => setFullName(e.target.value)} className="w-full bg-white/[0.03] border border-white/10 rounded-full px-20 py-5 text-sm font-bold text-white focus:outline-none focus:border-teal-500/50 transition-all placeholder:text-slate-600 shadow-inner" placeholder="Your full name" />
                 </div>
               </div>
             )}
 
-            <div className="relative group">
-              <Mail className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within:text-emerald-500 transition-colors" />
-              <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="input-glass !pl-16" placeholder="Email address" />
-            </div>
+            {(authMode === 'login' || authMode === 'signup' || authMode === 'forgot' || authMode === 'reset') && (
+              <div className="relative group">
+                <Mail className="absolute left-8 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-teal-400 transition-colors" />
+                <input type="email" required value={email} onChange={e => setEmail(e.target.value)} className="w-full bg-white/[0.03] border border-white/10 rounded-full px-20 py-5 text-sm font-bold text-white focus:outline-none focus:border-teal-500/50 transition-all placeholder:text-slate-600 shadow-inner" placeholder="Email address" />
+              </div>
+            )}
             
-            <div className="relative group">
-              <KeyRound className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-600 group-focus-within:text-emerald-500 transition-colors" />
-              <input type="password" required value={password} onChange={e => setPassword(e.target.value)} className="input-glass !pl-16" placeholder="Password" />
-            </div>
+            {(authMode === 'login' || authMode === 'signup' || authMode === 'reset') && (
+              <div className="space-y-4">
+                <div className="relative group">
+                  <KeyRound className="absolute left-8 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-teal-400 transition-colors" />
+                  <input type={showPassword ? "text" : "password"} required value={password} onChange={e => setPassword(e.target.value)} className="w-full bg-white/[0.03] border border-white/10 rounded-full px-20 py-5 text-sm font-bold text-white focus:outline-none focus:border-teal-500/50 transition-all placeholder:text-slate-600 shadow-inner !pr-16" placeholder={authMode === 'reset' ? "New Password" : "Password"} />
+                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-8 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors">
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+                {authMode === 'reset' && (
+                  <div className="relative group">
+                    <KeyRound className="absolute left-8 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-teal-400 transition-colors" />
+                    <input type={showPassword ? "text" : "password"} required value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} className="w-full bg-white/[0.03] border border-white/10 rounded-full px-20 py-5 text-sm font-bold text-white focus:outline-none focus:border-teal-500/50 transition-all placeholder:text-slate-600 shadow-inner" placeholder="Confirm New Password" />
+                  </div>
+                )}
+                {/* Forgot Password Removed */}
+              </div>
+            )}
 
-            <button type="submit" disabled={submitting} className="w-full btn-premium py-4.5 mt-2 !bg-gradient-to-r !from-teal-500 !to-blue-600 hover:!from-teal-600 hover:!to-blue-700 !shadow-teal-500/20 !border-none">
-              {submitting ? <div className="w-6 h-6 border-3 border-slate-950/30 border-t-slate-950 rounded-full animate-spin" /> : <>{isLoginMode ? 'Access Portal' : 'Register Now'} <ArrowRight className="w-5 h-5" /></>}
+            <button type="submit" disabled={submitting} className="w-full py-5 rounded-full bg-gradient-to-r from-teal-500 to-blue-600 text-white font-black text-xs uppercase tracking-widest shadow-xl shadow-teal-500/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-50">
+              {submitting ? <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" /> : (
+                <>
+                  {authMode === 'login' && 'Access Portal'}
+                  {authMode === 'signup' && 'Create Account'}
+                  {authMode === 'forgot' && 'Send Reset Link'}
+                  {authMode === 'reset' && 'Update Password'}
+                  <ArrowRight className="w-5 h-5" />
+                </>
+              )}
             </button>
           </form>
 
-          <div className="mt-10 text-center">
-            <button onClick={() => setIsLoginMode(!isLoginMode)} className="text-slate-500 text-sm font-semibold hover:text-emerald-400 transition-all underline underline-offset-8 decoration-white/5">
-              {isLoginMode ? "Need an account? Sign up" : "Already registered? Sign in"}
-            </button>
+          <div className="mt-12 text-center flex flex-col gap-4">
+            {authMode === 'login' && (
+              <button onClick={() => setAuthMode('signup')} className="text-slate-500 text-[11px] font-black uppercase tracking-widest hover:text-teal-400 transition-all">
+                New here? <span className="text-teal-400 underline underline-offset-4">Create an account</span>
+              </button>
+            )}
+            {(authMode === 'signup' || authMode === 'forgot' || authMode === 'reset') && (
+              <button onClick={() => setAuthMode('login')} className="text-slate-500 text-[11px] font-black uppercase tracking-widest hover:text-teal-400 transition-all">
+                Back to <span className="text-teal-400 underline underline-offset-4">Sign In</span>
+              </button>
+            )}
           </div>
         </div>
       </motion.div>

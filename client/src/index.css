@@ -39,8 +39,8 @@
 
 @layer components {
   .sidebar-link {
-    color: var(--text-muted);
-    @apply flex items-center gap-3 px-4 py-3 rounded-xl font-bold transition-all duration-200;
+    color: #475569; /* Slate-600 for better visibility */
+    @apply flex items-center gap-3 px-4 py-3 rounded-xl font-black transition-all duration-200 text-sm;
   }
 
   .sidebar-link:hover {
@@ -50,8 +50,8 @@
 
   .sidebar-link-active {
     color: var(--indigo-primary);
-    background-color: rgba(99, 102, 241, 0.1);
-    @apply shadow-sm shadow-indigo-500/5;
+    background-color: rgba(99, 102, 241, 0.15);
+    @apply shadow-md shadow-indigo-500/10;
   }
 
   .glass-card {

@@ -372,7 +372,7 @@ export default function StudentDashboard() {
           <div className="glass-card p-4 md:p-5 border-indigo-100 relative overflow-hidden group">
             <div className="relative z-10">
               <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center mb-3 group-hover:scale-110 transition-transform"><User className="w-4 h-4" /></div>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Student Account</p>
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Student Account</p>
               <h4 className="text-sm font-black text-[var(--text-main)] group-hover:text-indigo-600 transition-colors capitalize">{currentUser?.email?.split('@')[0]}</h4>
               <button onClick={() => changeTab('overview')} className="w-full mt-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition-all flex items-center justify-center gap-2">
                 <UploadCloud className="w-4 h-4" /> New Upload

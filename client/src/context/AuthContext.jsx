@@ -54,12 +54,26 @@ export function AuthProvider({ children }) {
     await supabase.auth.signOut(); // <- Background mein hoti hai
   };
 
+  const resetPassword = async (email) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin + '/login#reset-password',
+    });
+    if (error) throw error;
+  };
+
+  const updatePassword = async (newPassword) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+  };
+
   const value = {
     currentUser,
     loading,
     signup,
     login,
-    logout
+    logout,
+    resetPassword,
+    updatePassword
   };
 
   return (

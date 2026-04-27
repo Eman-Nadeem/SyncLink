@@ -16,15 +16,32 @@ BEGIN
   END IF;
 END $$;
 
+-- 1.5. Create Classes Table (Subjects)
+CREATE TABLE IF NOT EXISTS classes (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  name text NOT NULL,
+  teacher_email text NOT NULL,
+  created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
 -- 2. Create Teacher's Assignments Table (Tasks given to students)
 CREATE TABLE IF NOT EXISTS assignments (
   id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  class_id uuid REFERENCES classes(id) ON DELETE CASCADE,
   title text NOT NULL,
   description text,
   deadline timestamp with time zone,
   total_marks integer DEFAULT 100,
   created_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL
 );
+
+-- Safely add class_id if assignments table already exists
+DO $$
+BEGIN
+  BEGIN
+    ALTER TABLE assignments ADD COLUMN class_id uuid REFERENCES classes(id) ON DELETE CASCADE;
+  EXCEPTION WHEN duplicate_column THEN END;
+END $$;
 
 -- 3. Create/Update Submissions Table (Files uploaded by students)
 CREATE TABLE IF NOT EXISTS submissions (
@@ -65,12 +82,21 @@ END $$;
 -- SECURITY & POLICIES (RLS)
 -- ==========================================
 
+GRANT ALL ON TABLE classes TO anon, authenticated;
 GRANT ALL ON TABLE assignments TO anon, authenticated;
 GRANT ALL ON TABLE submissions TO anon, authenticated;
 
 -- Enable RLS
+ALTER TABLE classes ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE submissions ENABLE ROW LEVEL SECURITY;
+
+-- Allow all operations for now (Easy Development)
+DROP POLICY IF EXISTS "Allow all inserts on classes" ON classes;
+CREATE POLICY "Allow all inserts on classes" ON classes FOR INSERT TO public WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all selects on classes" ON classes;
+CREATE POLICY "Allow all selects on classes" ON classes FOR SELECT TO public USING (true);
 
 -- Allow all operations for now (Easy Development)
 DROP POLICY IF EXISTS "Allow all inserts on assignments" ON assignments;
@@ -87,6 +113,12 @@ CREATE POLICY "Allow all selects on submissions" ON submissions FOR SELECT TO pu
 
 DROP POLICY IF EXISTS "Allow all updates on submissions" ON submissions;
 CREATE POLICY "Allow all updates on submissions" ON submissions FOR UPDATE TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all deletes on submissions" ON submissions;
+CREATE POLICY "Allow all deletes on submissions" ON submissions FOR DELETE TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow all deletes on assignments" ON assignments;
+CREATE POLICY "Allow all deletes on assignments" ON assignments FOR DELETE TO public USING (true);
 
 -- ==========================================
 -- STORAGE BUCKET
@@ -108,6 +140,14 @@ CREATE POLICY "Public Access" ON storage.objects FOR ALL USING (bucket_id = 'ass
 -- Pehle check karo kya supabase_realtime publication exist karti hai
 DO $$
 BEGIN
+  -- classes table ko realtime publication mein add karo
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'classes'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE classes;
+  END IF;
+
   -- assignments table ko realtime publication mein add karo
   IF NOT EXISTS (
     SELECT 1 FROM pg_publication_tables
@@ -125,3 +165,83 @@ BEGIN
   END IF;
 END $$;
 
+
+-- ==========================================
+-- PHASE 2: STUDENT ENROLLMENTS
+-- ==========================================
+
+-- 5. Create Enrollments Table
+CREATE TABLE IF NOT EXISTS enrollments (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  class_id uuid REFERENCES classes(id) ON DELETE CASCADE,
+  student_email text NOT NULL,
+  student_name text,
+  student_roll_no text,
+  status text DEFAULT 'pending', -- Options: 'pending', 'approved', 'rejected'
+  enrolled_at timestamp with time zone DEFAULT timezone('utc'::text, now()) NOT NULL,
+  UNIQUE(class_id, student_email) -- Prevent duplicate requests
+);
+
+GRANT ALL ON TABLE enrollments TO anon, authenticated;
+ALTER TABLE enrollments ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all inserts on enrollments" ON enrollments;
+CREATE POLICY "Allow all inserts on enrollments" ON enrollments FOR INSERT TO public WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all selects on enrollments" ON enrollments;
+CREATE POLICY "Allow all selects on enrollments" ON enrollments FOR SELECT TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow all updates on enrollments" ON enrollments;
+CREATE POLICY "Allow all updates on enrollments" ON enrollments FOR UPDATE TO public USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all deletes on enrollments" ON enrollments;
+CREATE POLICY "Allow all deletes on enrollments" ON enrollments FOR DELETE TO public USING (true);
+
+-- Add to Realtime
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'enrollments'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE enrollments;
+  END IF;
+END $$;
+
+
+-- ==========================================
+-- PHASE 3: ATTENDANCE TRACKING
+-- ==========================================
+
+-- 6. Create Attendance Table
+CREATE TABLE IF NOT EXISTS attendance (
+  id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+  class_id uuid REFERENCES classes(id) ON DELETE CASCADE,
+  student_email text NOT NULL,
+  status text NOT NULL, -- 'present', 'absent'
+  date date DEFAULT current_date,
+  UNIQUE(class_id, student_email, date)
+);
+
+GRANT ALL ON TABLE attendance TO anon, authenticated;
+ALTER TABLE attendance ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all inserts on attendance" ON attendance;
+CREATE POLICY "Allow all inserts on attendance" ON attendance FOR INSERT TO public WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all selects on attendance" ON attendance;
+CREATE POLICY "Allow all selects on attendance" ON attendance FOR SELECT TO public USING (true);
+
+DROP POLICY IF EXISTS "Allow all updates on attendance" ON attendance;
+CREATE POLICY "Allow all updates on attendance" ON attendance FOR UPDATE TO public USING (true) WITH CHECK (true);
+
+-- Add to Realtime
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables
+    WHERE pubname = 'supabase_realtime' AND tablename = 'attendance'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE attendance;
+  END IF;
+END $$;

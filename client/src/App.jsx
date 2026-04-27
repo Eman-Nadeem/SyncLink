@@ -7,7 +7,15 @@ import TeacherDashboard from './pages/TeacherDashboard';
 
 // Protected Route Component
 const ProtectedRoute = ({ children, allowedRole }) => {
-  const { currentUser } = useAuth();
+  const { currentUser, loading } = useAuth();
+  
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[var(--bg-main)] flex flex-col items-center justify-center gap-6">
+         <div className="w-12 h-12 border-4 border-indigo-100 border-t-indigo-600 rounded-full animate-spin"></div>
+      </div>
+    );
+  }
   
   if (!currentUser) {
     return <Navigate to="/" />;

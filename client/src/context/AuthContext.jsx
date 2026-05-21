@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../supabase/supabaseClient';
 
@@ -11,13 +12,17 @@ export function AuthProvider({ children }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // Restore session on initial load and subscribe to auth changes
   useEffect(() => {
-    // ✅ FIX 1: Pehle onAuthStateChange subscribe karo
-    // Yeh Supabase ka cached session se INSTANTLY fire karta hai
-    // Isse initial load pe spinner nahi dikhta (zyada der ke liye)
+    // 1. Fetch existing session (if any) from Supabase's local storage
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCurrentUser(session?.user ?? null);
+      setLoading(false);
+    });
+
+    // 2. Listen for auth state changes (login, logout, token refresh, etc.)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setCurrentUser(session?.user || null);
-      setLoading(false); // <- Yeh fast fire hota hai cached session se
+      setCurrentUser(session?.user ?? null);
     });
 
     return () => subscription.unsubscribe();
@@ -28,10 +33,7 @@ export function AuthProvider({ children }) {
       email,
       password,
       options: {
-        data: {
-          role: role,
-          full_name: fullName,
-        }
+        data: { role, full_name: fullName }
       }
     });
     if (error) throw error;
@@ -39,24 +41,20 @@ export function AuthProvider({ children }) {
   };
 
   const login = async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
   };
 
-  // ✅ FIX 2: Optimistic Logout - UI turant clear ho jata hai
-  // Server call background mein hoti hai - user ko wait nahi karna padta
+  // Optimistic UI logout – clear user immediately, then sign out in background
   const logout = async () => {
-    setCurrentUser(null); // <- Ye line turant UI update kar deti hai
-    await supabase.auth.signOut(); // <- Background mein hoti hai
+    setCurrentUser(null);
+    await supabase.auth.signOut();
   };
 
   const resetPassword = async (email) => {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: window.location.origin + '/login#reset-password',
+      redirectTo: `${window.location.origin}/login#reset-password`
     });
     if (error) throw error;
   };

@@ -93,40 +93,51 @@ graph TD
 ```
 
 #### B. Entity Relationship Diagram (ERD)
-**Purpose:** Shows the relationship between your primary database tables.
+**Purpose:** Shows the relationship between your primary database tables including the new Attendance and Enrollment modules.
 ```mermaid
 erDiagram
-    USERS {
+    CLASSES {
         uuid id PK
-        string email
-        string role "student or teacher"
-        string full_name
+        string name
+        string teacher_email
     }
     ASSIGNMENTS {
         uuid id PK
+        uuid class_id FK
         string title
         string description
         timestamp deadline
         int total_marks
-        timestamp created_at
     }
     SUBMISSIONS {
         uuid id PK
         uuid assignment_id FK
         string student_email
-        string file_url
         string status "submitted, graded"
         numeric grade
-        string feedback
+    }
+    ENROLLMENTS {
+        uuid id PK
+        uuid class_id FK
+        string student_email
+        string status "pending, approved, rejected"
+    }
+    ATTENDANCE {
+        uuid id PK
+        uuid class_id FK
+        string student_email
+        string status "present, absent"
+        date date
     }
 
-    USERS ||--o{ SUBMISSIONS : "makes"
-    USERS ||--o{ ASSIGNMENTS : "creates (if teacher)"
+    CLASSES ||--o{ ASSIGNMENTS : "contains"
+    CLASSES ||--o{ ENROLLMENTS : "has"
+    CLASSES ||--o{ ATTENDANCE : "tracks"
     ASSIGNMENTS ||--o{ SUBMISSIONS : "receives"
 ```
 
-#### C. Sequence Diagram (Realtime Submission Flow)
-**Purpose:** Shows the step-by-step process of a student submitting work and the teacher receiving a live update.
+#### C. Sequence Diagrams (Realtime Interactions)
+**1. Realtime Submission Flow:**
 ```mermaid
 sequenceDiagram
     participant Student as Student UI
@@ -137,13 +148,69 @@ sequenceDiagram
 
     Teacher->>Socket: Subscribes to 'submissions' table
     Student->>Storage: Uploads PDF File
-    Storage-->>Student: Returns File URL
-    Student->>DB: INSERT into submissions (URL, Assignment ID)
+    Student->>DB: INSERT into submissions
     DB-->>Socket: Triggers 'INSERT' Event
-    Socket-->>Teacher: Pushes New Submission Data
-    Teacher-->>Teacher: React State Updates instantly (No Page Refresh)
-    Teacher-->>Teacher: Triggers Toast Notification
+    Socket-->>Teacher: Pushes Data instantly
+    Teacher-->>Teacher: UI Updates & Toast Notification
 ```
 
-### 8. Conclusion & Implementation Status
-The project has successfully moved past the initial design phase into a fully functional, production-ready implementation. All core modules—including the advanced grading system, real-time notification engine, and premium data-visualization dashboard—are now live. The recent UI overhaul to a premium Teal/Blue aesthetic further elevates the system to enterprise SaaS standards.
+**2. Realtime Attendance Marking:**
+```mermaid
+sequenceDiagram
+    participant Teacher as Teacher UI
+    participant DB as Supabase DB
+    participant Socket as Realtime Engine
+    participant Student as Student UI
+
+    Student->>Socket: Subscribes to 'attendance' table
+    Teacher->>DB: UPSERT into attendance (Status: Present)
+    DB-->>Socket: Triggers 'UPSERT' Event
+    Socket-->>Student: Pushes Attendance Update
+    Student-->>Student: Percentage Gauge Updates instantly
+```
+
+### 8. Recent Updates & New Modules (Implemented in Final Phase)
+The following advanced modules have been added to the system to ensure a complete, enterprise-grade academic management experience:
+
+#### **A. Class Hub & Isolation Model**
+- **Scoped Dashboard:** Both Student and Teacher dashboards now follow a "Class Hub" model. Teachers manage specific subjects independently, with isolated Review Queues and Assignment lists.
+- **Improved Data Privacy:** Data is filtered at the database level using `class_id`, ensuring no overlap between different subjects.
+
+#### **B. Real-Time Attendance System**
+- **Daily Attendance Marking:** Teachers can mark students as 'Present' or 'Absent' with a single click.
+- **Smart-Lock Logic:** Once marked, attendance buttons are disabled to prevent accidental changes. A dedicated "Edit Status" button allows the teacher to unlock and modify records if needed.
+- **Student Analytics:** Students receive real-time updates on their attendance. The dashboard calculates:
+    - **Classes Conducted:** Total sessions recorded for the student.
+    - **Attendance Rate:** Dynamic percentage gauge (e.g., 95% Present).
+    - **Present/Absent Count:** Visual breakdown of their attendance history.
+
+#### **C. Professional Enrollment Workflow**
+- **Request & Approval:** Students must request to join a class by providing their full name and University Roll Number.
+- **Real-Time Notification:** When an instructor approves or rejects a request, students receive an instant **Bell Notification** and **Toast Alert** via WebSockets.
+- **Duplicate Prevention:** Strict database constraints prevent duplicate enrollment requests for the same class.
+
+#### **D. Advanced Grading & Performance Tracking**
+- **Dynamic Scoring:** The grading modal now shows total marks and calculates percentages on the fly.
+- **Color-Coded Feedback:** Grades below 50% are automatically highlighted in **Red**, while passing grades (50%+) are shown in **Green**.
+- **Submission Locking:** Once an assignment is graded, it is strictly locked. Students cannot edit or delete graded work, ensuring academic integrity.
+
+#### E. UI/UX & Dark Mode Optimization
+- **Teacher Notification Panel:** Added an X (close) button inside the dropdown header, allowing instant dismissal of notifications.
+- **Student Notification Panel:** Mirrored the teacher’s close button, providing a consistent UI for both roles.
+- **Icon Styling Utility:** Introduced `.icon-primary` class in `index.css` to enforce theme‑aware icon colors, improving contrast in both light and dark modes.
+- **Responsive Layout Fixes:** Adjusted dropdown widths to `w‑72` for a compact, premium look.
+- **Micro‑Animations:** Integrated `framer-motion` transitions for smooth opening/closing of notification panels.
+- **Teacher Notification Panel:** Added an X (close) button inside the dropdown header, allowing instant dismissal of notifications.
+- **Student Notification Panel:** Mirrored the teacher’s close button, providing a consistent UI for both roles.
+- **Icon Styling Utility:** Introduced `.icon-primary` class in `index.css` to enforce theme‑aware icon colors, improving contrast in both light and dark modes.
+- **Responsive Layout Fixes:** Adjusted dropdown widths to `w‑72` for a compact, premium look.
+- **Micro‑Animations:** Integrated `framer-motion` transitions for smooth opening/closing of notification panels.
+- **Total Theme Sync:** The entire application (including charts, inputs, and dropdowns) has been optimized for a seamless Dark Mode experience.
+- **Modular Dashboard States:** Implementation of `framer-motion` for smooth transitions between Overview, Subjects, and Progress tabs.
+
+### 9. Conclusion & Final Implementation Status
+The "SyncLink" system is now a comprehensive, production-ready solution for academic assignment management. With the addition of the **Attendance Module**, **Class Hub**, and **Real-time Notifications**, it covers the entire lifecycle of student-teacher interaction. The project successfully meets all functional requirements of the 8th-semester Software Engineering curriculum, delivering a premium, high-performance cloud application.
+
+---
+**Report Updated on:** April 26, 2026  
+**Status:** All modules fully implemented and verified.
